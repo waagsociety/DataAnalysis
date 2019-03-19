@@ -469,6 +469,8 @@ for ( i in colnames(daily_avrg)[grep("PM25",colnames(daily_avrg))] ){
   }
 }
 
+weekdays_averages$time <- factor(weekdays_averages$time,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
+
 weekdays_averages <- melt(weekdays_averages,"time")
 
 ttl <- paste(paste(sensor_ids,collapse=","),"week days average",paste(date(start),date(end),sep=" / "),sep=" - ")
@@ -506,7 +508,7 @@ days_averages[,time:=NULL]
 days_averages <- cbind(days_averages, newCols)
 
 setkey(days_averages,day,hour)
-days_averages <- melt(days_averages,c("day","hour"))
+days_averages_mlt <- melt(days_averages,c("day","hour"))
 #levels(days_averages$day) <- factor(c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
 
 
@@ -514,9 +516,9 @@ ttl <- paste(paste(sensor_ids,collapse=","),"hour of the day average",paste(date
 
 # a<- days_averages[variable %in% colnames(daily_avrg)[grep("^PM25",colnames(daily_avrg))]]
 # a<- days_averages[variable %in% c("PM25.697435","PM25.2183229")]
-a<- days_averages[variable %in% c("PM25.697435","PM25.2183229")]
+# a<- days_averages_mlt[variable %in% c("PM25.697435","PM25.2183229")]
 
-g <- ggplot(data=days_averages,aes(x = hour, y = value,colour = variable,linetype=variable)) +
+g <- ggplot(data=days_averages_mlt,aes(x = hour, y = value,colour = variable,linetype=variable)) +
   geom_line() +
   scale_x_continuous(breaks=seq(0,23,4),minor_breaks=0:23) +
   facet_wrap( ~ day, nrow = 1)
