@@ -19,6 +19,7 @@ library(ggplot2)
 library(Hmisc)
 library(scales)
 library(lubridate)
+library(parsedate)
 library(reshape2)
 
 my_mean <-function(x){
@@ -56,26 +57,50 @@ hourlyTimeSlots <- function(my_start,my_end){
   # Considering only full hours
   my_start <- ceiling_date(my_start,"hour")
   my_end <- floor_date(my_end,"hour")
-  slots <- my_start
-  pivot <- my_start
-  while(pivot <= my_end){
-    pivot <- pivot + hours(1)
-    slots <- append(slots,pivot)
-  }
- return(slots)
+  n_hours <- interval(my_start,my_end)/hours(1) + 1
+  slots <- .POSIXct(.POSIXct(my_start,tz="UTC") + hours(0:n_hours),tz="CET")
+  return(slots)
 }
 
 dailyTimeSlots <- function(my_start,my_end){
   # Considering only full days
   my_start <- ceiling_date(my_start,"day")
   my_end <- floor_date(my_end,"day")
-  slots <- my_start
-  pivot <- my_start
-  while(pivot <= my_end){
-    pivot <- pivot + days(1)
-    slots <- append(slots,pivot)
-  }
+  n_days <- interval(my_start,my_end)/days(1)
+  slots <- .POSIXct(.POSIXct(my_start,tz="UTC") + days(0:n_days),tz="CET")
   return(slots)
+}
+
+checkCompleteness <-function(times,days){
+  min_time <- min(times)
+  max_time <- max(times)
+  
+  if (min_time != start_date){
+    print("Start date and min date of data are not equal!!!")
+    min_time <- max(min_time,start_date)
+  }
+  if (max_time != end_date){
+    print("Start date and min date of data are not equal!!!")
+    max_time <- min(max_time,end_date)
+  }
+  
+  my_times <- times[times >= min_time & times <= max_time]
+  
+  if (days){
+    slots <- hourlyTimeSlots(min_time,max_time)
+    if (length(slots) != length(my_times)){
+      print("Lenght of hourly slots is not consistent!!!")
+    }else if ( sum(my_times != slots) > 0 ){
+      print("Hourly slots are not complete!!!")
+    }
+  }else{
+    slots <- dailyTimeSlots(min_time,max_time)
+    if (length(slots) != length(my_times)){
+      print("Lenght of daily slots is not consistent!!!")
+    }else if ( sum(my_times != slots) > 0 ){
+      print("Daily slots are not complete!!!")
+    }
+  }
 }
 
 humCorrectionPM25 <- function(rh){
@@ -110,10 +135,8 @@ style_plot <- function(g,ttl,xlab,start_point){
     theme(plot.title = element_text(size = 11, face = "bold", hjust=.5)) +
     xlab(xlab) + ylab(expression(paste(mu,"g","/",m^3))) +
     geom_hline(yintercept=threshold_standards[1],linetype="dashed", colour = "black",size=.2)
-#   geom_text(aes(start_range[i],threshold_standards[1],label = names(threshold_standards)[1], vjust = -1), size = 3, family="mono", fontface = "italic")
-#   annotate("text", x=start_range[i], y=threshold_standards[2], label=names(threshold_standards)[2],size=3,vjust=-1) +
-#   annotate("text", x=start_range[i], y=threshold_standards[3], label=names(threshold_standards)[3],size=3,vjust=-1)
-  if( start_point != 0 ){
+
+    if( start_point != 0 ){
     g <- g + annotate("text", x=start_point, y=threshold_standards[1], label=names(threshold_standards)[1],size=3,vjust=-1,hjust=0)
   }
   return(g)
@@ -133,17 +156,20 @@ if(!exists("waag_hourly_avrg")){
   putMsg("Reading Waag sensors data", doStop=FALSE)
   
   #consider only full hours
-  start <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
-  end <- floor_date(Sys.time(),"hour")
+  start_date <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
+  # start_date <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
+  end_date <- floor_date(Sys.time(),"hour")
+  # end_date <- as.POSIXct("01/12/2018 00:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET")
   
   server <- 'https://lkvis.rivm.nl/api/datasources/proxy/23/query?db=waag&q='
-  query <- "SELECT PM10, PM25, Temp, Hum, Pres FROM autogen.vuurwerk WHERE time >= %is AND time <= %is AND %s GROUP BY id "
-  suffix <- "&epoch=ms"
+  query <- "SELECT PM10, PM25, Temp, Hum, Pres FROM autogen.vuurwerk WHERE time >= %is AND time < %is AND %s GROUP BY id "
+  # suffix <- "&epoch=ms"
+  suffix <- ""
   sensor_ids <- c(2183229,697435)
   where <- paste("( id = '",paste(sensor_ids,collapse="' OR id = '"),"' )",sep="")
-  # .POSIXct(start, tz="CET")
+  # .POSIXct(start_date, tz="CET")
   
-  query_enc <- URLencode(sprintf(query, as.integer(start),as.integer(end),where))
+  query_enc <- URLencode(sprintf(query, as.integer(start_date),as.integer(end_date),where))
   
   request <- paste(server,query_enc,suffix,sep="")
   
@@ -168,12 +194,27 @@ if(!exists("waag_hourly_avrg")){
   
   colnames(val_1) <- col_1
   colnames(val_2) <- col_2
-  
-  val_1$time <- .POSIXct(val_1$time/1000)
-  val_2$time <- .POSIXct(val_2$time/1000)
+  browser()
+  val_1$time <- with_tz(ymd_hms(val_1$time))
+  val_2$time <- with_tz(ymd_hms(val_2$time))
   
   setkey(val_1,time)
   setkey(val_2,time)
+  
+  val_1$PM25 <- as.numeric(val_1$PM25)
+  val_2$PM25 <- as.numeric(val_2$PM25)
+  
+  val_1$PM10 <- as.numeric(val_1$PM10)
+  val_2$PM10 <- as.numeric(val_2$PM10)
+  
+  val_1$Hum <- as.numeric(val_1$Hum)
+  val_2$Hum <- as.numeric(val_2$Hum)
+  
+  val_1$Temp <- as.numeric(val_1$Temp)
+  val_2$Temp <- as.numeric(val_2$Temp)
+  
+  val_1$Pres <- as.numeric(val_1$Pres)
+  val_2$Pres <- as.numeric(val_2$Pres)
   
   # apply corrections for Humidity
   val_1$PM25 <- val_1$PM25/humCorrectionPM25(val_1$Hum)
@@ -189,7 +230,7 @@ if(!exists("waag_hourly_avrg")){
   
   # we use this instead of cut(waag_val$time,"1 day",right=FALSE)
   # necessary to have POSIX.ct and not factors
-  cuts <- list(time=floor_date(waag_val$time,unit="hour"))
+  cuts <- list(time=ceiling_date(waag_val$time,unit="hour"))
   
   first <- TRUE
   for ( i in colnames(waag_val)[-1] ){
@@ -204,12 +245,19 @@ if(!exists("waag_hourly_avrg")){
     }
   }
   
+  waag_hourly_avrg <- waag_hourly_avrg[time>=start_date & time < end_date,]
+  
+  if ( sum(duplicated(waag_hourly_avrg$time)) > 0 ){
+    stop("There are duplicates in Waag hourly time points")
+  }
+  
   # we use this instead of cut(waag_val$time,"1 day",right=FALSE)
   # necessary to have POSIX.ct and not factors
-  cuts <- list(time=floor_date(waag_val$time,unit="day"))
+  cuts <- list(time=ceiling_date(waag_val$time,unit="day"))
   
   
   first <- TRUE
+  # browser()
   for ( i in colnames(waag_val)[-1] ){
     running <- data.table(aggregate(waag_val[,get(i)],cuts,my_mean))
     colnames(running)[which(colnames(running) == "x")] <- i
@@ -220,6 +268,12 @@ if(!exists("waag_hourly_avrg")){
     }else{
       waag_daily_avrg <- merge(waag_daily_avrg,running,by="time",all=TRUE)
     }
+  }
+  
+  waag_daily_avrg <- waag_daily_avrg[time>=start_date & time < end_date,]
+  
+  if ( sum(duplicated(waag_daily_avrg$time)) > 0 ){
+    stop("There are duplicates in Waag daily time points")
   }
   
   my_msg <- paste("Processing Waag sensors data DONE, time elapsed:", get_elapsed(),"seconds")
@@ -239,7 +293,13 @@ if(!exists("ggd_hourly_avrg")){
   request <- paste(server,endpoint,sep="")
   
   con <- curl(request)
-  result <- readLines(con)
+  result <- tryCatch(readLines(con),error=function(e){
+    msg <- paste("Request:",request,"gave error:",e)
+    putMsg(msg, doStop=FALSE)
+    return("{}")
+  }
+  )
+  
   close(con)
   
   jresult <- fromJSON(result)
@@ -258,19 +318,29 @@ if(!exists("ggd_hourly_avrg")){
   for( i in 1:nrow(ams_stations)){
     
     station_id <- ams_stations$number[i]
-    paging_end <- end
+    
+    paging_end <- end_date
     
     station_first <- TRUE
     
     repeat{
-      query_with_params <- sprintf(query, format(start,usetz = TRUE), format(paging_end,usetz = TRUE), station_id,formulas)
+      # print(paging_end)
+      query_with_params <- sprintf(query, format_iso_8601(start_date),format_iso_8601(paging_end), station_id,formulas)
       
       query_enc <- URLencode(query_with_params)
       
       request <- paste(server,endpoint,query_enc,sep="")
       
+      
+      
       con <- curl(request)
-      result <- readLines(con)
+      result <- tryCatch(readLines(con),error=function(e){
+          msg <- paste(ams_stations$location[i],"gave error:",e)
+          putMsg(msg, doStop=FALSE)
+          browser()
+          return("{}")
+        }
+      )
       close(con)
       
       #browser()
@@ -309,7 +379,7 @@ if(!exists("ggd_hourly_avrg")){
       
       paging_end <- min(ggd_station_hourly_avrg$time)
       
-      if ( paging_end <= start ){
+      if ( paging_end <= start_date ){
         break
       }else{
         #print(paste(ams_stations$location[i],paging_end))
@@ -318,6 +388,12 @@ if(!exists("ggd_hourly_avrg")){
     
     if ( station_first ){
       next
+    }
+    dup <- duplicated(ggd_station_hourly_avrg$time)
+    
+    if (sum(dup) > 0){
+      print(paste(sum(dup),"duplicates for",ams_stations$number[i]))
+      ggd_station_hourly_avrg <- ggd_station_hourly_avrg[!dup,]
     }
 
     if (first){
@@ -328,13 +404,19 @@ if(!exists("ggd_hourly_avrg")){
     }
   }
   
+  ggd_hourly_avrg <- ggd_hourly_avrg[time>=start_date & time < end_date,]
+  
+  if (sum(duplicated(ggd_hourly_avrg$time)) > 0){
+    stop("There are duplicates in the GGD hourly time points")
+  }
+  
   my_msg <- paste("Reading GGD station HOURLY data DONE, time elapsed:", get_elapsed(),"seconds")
   putMsg(my_msg, doStop=FALSE)
   putMsg("Processing GGD station data", doStop=FALSE)
   
   # we use this instead of cuts <- list(time=cut(ggd_hourly_avrg$time,"1 day",right=FALSE))
   # necessary to have POSIX.ct and not factors
-  cuts <- list(time=floor_date(ggd_hourly_avrg$time,unit="day"))
+  cuts <- list(time=ceiling_date(ggd_hourly_avrg$time,unit="day"))
   
   first <- TRUE
   for ( i in colnames(ggd_hourly_avrg)[-1] ){
@@ -348,6 +430,13 @@ if(!exists("ggd_hourly_avrg")){
       ggd_daily_avrg <- merge(ggd_daily_avrg,running,by="time",all=TRUE)
     }
   }
+  
+  ggd_daily_avrg <- ggd_daily_avrg[time>=start_date & time < end_date,]
+  
+  if (sum(duplicated(ggd_daily_avrg$time)) > 0){
+    stop("There are duplicates in the GGD daily time points")
+  }
+  
   
   my_msg <- paste("Processing GGD station data DONE, time elapsed:", get_elapsed(),"seconds")
   putMsg(my_msg, doStop=FALSE)
@@ -411,9 +500,10 @@ palettes <- make_palette()
 cbPalette <- palettes[[1]]
 ltPalette <- palettes[[2]]
 
+
 waag_daily_avrg_mlt <- melt(waag_daily_avrg,id.vars="time",measure.vars=colnames(waag_daily_avrg)[grep("PM25|Hum",colnames(waag_daily_avrg))])
 
-ttl <- paste(paste(sensor_ids,collapse = ","),"daily average", paste(date(start),date(end),sep=" / "),sep=" - ")
+ttl <- paste(paste(sensor_ids,collapse = ","),"daily average", paste(date(start_date),date(end_date),sep=" / "),sep=" - ")
 
 g <- ggplot(data=waag_daily_avrg_mlt,aes(x=time)) + 
         geom_line(aes(y = value, colour = variable, linetype = variable)) +
@@ -421,114 +511,115 @@ g <- ggplot(data=waag_daily_avrg_mlt,aes(x=time)) +
 #        scale_x_date(date_breaks = "1 month", date_minor_breaks = "1 week", date_labels = "%B") +
         theme(axis.text.x = element_text(angle = 25, vjust = 1.0, hjust = 1.0))
 
-g <- style_plot(g,ttl,"time",start)
+g <- style_plot(g,ttl,"time",start_date)
 
 print(g)
 putMsg(ttl, doStop=TRUE)
 
-labels_months <- c("November","December","January","February")
-start_months <- c("01/11/2018 00:00:00","01/12/2018 00:00:00","01/01/2019 00:00:00","01/02/2019 00:00:00")
-end_months <- c("30/11/2018 23:59:59","31/12/2018 23:59:59","31/01/2019 23:59:59","28/02/2019 23:59:59")
 
-start_range <- as.POSIXct(start_months,format="%d/%m/%Y %H:%M:%S", tz="CET")
-end_range <- as.POSIXct(end_months,format="%d/%m/%Y %H:%M:%S", tz="CET")
-
-daily_avrg_mlt <- melt(daily_avrg,id.vars="time",measure.vars=colnames(daily_avrg)[grep("PM25|Hum",colnames(daily_avrg))])
-
+labels_months <- unique(months(hourly_avrg$time))
+start_months <- unique(floor_date(hourly_avrg$time,unit="month"))
+end_months <- unique(ceiling_date(hourly_avrg$time,unit="month"))
 
 for( i in 1:length(labels_months)){
-    
+  
+    daily_avrg_month <- daily_avrg[time>= start_months[i]& time <end_months[i],]
+  
+    daily_avrg_mlt <- melt(daily_avrg_month,id.vars="time",measure.vars=colnames(daily_avrg)[grep("PM25|Hum",colnames(daily_avrg))])
+
     ttl <- paste(paste(sensor_ids,collapse=","),labels_months[i],"daily average",sep=" - ")
     
-    g <- ggplot(data=daily_avrg_mlt[time>= start_range[i]& time <=end_range[i],],aes(x=time)) +
+    g <- ggplot(data=daily_avrg_mlt,aes(x=time)) +
       geom_line(aes(y = value, colour = variable,linetype=variable)) +
       scale_x_datetime(date_breaks = "1 day", labels = date_format("%d-%m")) +
       theme(axis.text.x = element_text(angle = 25, vjust = 1.0, hjust = 1.0))
     
-    g <- style_plot(g,ttl,"time",start_range[i])
+    g <- style_plot(g,ttl,"time",start_months[i])
     
     print(g)
     putMsg(ttl, doStop=TRUE)
   
+
+    # Plot week days averages
+    
+    cuts <- list(time=as.factor(weekdays(daily_avrg_month$time)))
+    
+    first <- TRUE
+    for ( j in colnames(daily_avrg_month)[grep("PM25",colnames(daily_avrg_month))] ){
+      running <- data.table(aggregate(daily_avrg_month[,get(j)],cuts,my_mean))
+      colnames(running)[which(colnames(running) == "x")] <- j
+      
+      if (first){
+        weekdays_averages <- running
+        first <- FALSE
+      }else{
+        weekdays_averages <- merge(weekdays_averages,running,by="time",all=TRUE)
+      }
+    }
+    
+    weekdays_averages$time <- factor(weekdays_averages$time,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
+    
+    weekdays_averages <- melt(weekdays_averages,"time")
+    
+    ttl <- paste(paste(sensor_ids,collapse=","),"week days average",paste(start_months[i],end_months[i],sep=" / "),sep=" - ")
+    
+    g <- ggplot(data=weekdays_averages,aes(x=time,y=value,fill=variable)) +
+      geom_bar(stat="identity", position=position_dodge()) 
+    
+    g <- style_plot(g,ttl,"time",1)
+    
+    print(g)
+    putMsg(ttl, doStop=TRUE)
+    
+    
+    # Plot hour of the day averages
+    
+    hourly_avrg_montly <- hourly_avrg[time>= start_months[i]& time <end_months[i],]
+      
+    cuts <- list(time=as.factor(paste(weekdays(hourly_avrg_montly$time),hour(hourly_avrg_montly$time),sep="-")))
+    
+    first <- TRUE
+    for ( j in colnames(hourly_avrg_montly)[grep("PM25",colnames(hourly_avrg_montly))] ){
+      running <- data.table(aggregate(hourly_avrg_montly[,get(j)],cuts,my_mean))
+      colnames(running)[which(colnames(running) == "x")] <- j
+      
+      if (first){
+        days_averages <- running
+        first <- FALSE
+      }else{
+        days_averages <- merge(days_averages,running,by="time",all=TRUE)
+      }
+    }
+    
+    newCols <- colsplit(days_averages$time, "-", c("day","hour"))
+    newCols$day <- factor(newCols$day,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
+    
+    days_averages[,time:=NULL]
+    days_averages <- cbind(days_averages, newCols)
+    
+    setkey(days_averages,day,hour)
+    days_averages_mlt <- melt(days_averages,c("day","hour"))
+    #levels(days_averages$day) <- factor(c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
+    
+    
+    ttl <- paste(paste(sensor_ids,collapse=","),"hour of the day average",paste(start_months[i],end_months[i],sep=" / "),sep=" - ")
+    
+    # a<- days_averages[variable %in% colnames(daily_avrg)[grep("^PM25",colnames(daily_avrg))]]
+    # a<- days_averages[variable %in% c("PM25.697435","PM25.2183229")]
+    # a<- days_averages_mlt[variable %in% c("PM25.697435","PM25.2183229")]
+    
+    g <- ggplot(data=days_averages_mlt,aes(x = hour, y = value,colour = variable,linetype=variable)) +
+      geom_line() +
+      scale_x_continuous(breaks=seq(0,23,4),minor_breaks=0:23) +
+      facet_wrap( ~ day, nrow = 1)
+    
+    
+    g <- style_plot(g,ttl,"time",0)
+    
+    print(g)
+    putMsg(ttl, doStop=TRUE)
+
 }
-
-# Plot week days averages
-
-cuts <- list(time=as.factor(weekdays(daily_avrg$time)))
-
-first <- TRUE
-for ( i in colnames(daily_avrg)[grep("PM25",colnames(daily_avrg))] ){
-  running <- data.table(aggregate(daily_avrg[,get(i)],cuts,my_mean))
-  colnames(running)[which(colnames(running) == "x")] <- i
-  
-  if (first){
-    weekdays_averages <- running
-    first <- FALSE
-  }else{
-    weekdays_averages <- merge(weekdays_averages,running,by="time",all=TRUE)
-  }
-}
-
-weekdays_averages$time <- factor(weekdays_averages$time,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
-
-weekdays_averages <- melt(weekdays_averages,"time")
-
-ttl <- paste(paste(sensor_ids,collapse=","),"week days average",paste(date(start),date(end),sep=" / "),sep=" - ")
-
-g <- ggplot(data=weekdays_averages,aes(x=time,y=value,fill=variable)) +
-  geom_bar(stat="identity", position=position_dodge()) 
-
-g <- style_plot(g,ttl,"time",1)
-
-print(g)
-putMsg(ttl, doStop=TRUE)
-
-
-# Plot hour of the day averages
-
-cuts <- list(time=as.factor(paste(weekdays(hourly_avrg$time),hour(hourly_avrg$time),sep="-")))
-
-first <- TRUE
-for ( i in colnames(hourly_avrg)[grep("PM25",colnames(hourly_avrg))] ){
-  running <- data.table(aggregate(hourly_avrg[,get(i)],cuts,my_mean))
-  colnames(running)[which(colnames(running) == "x")] <- i
-  
-  if (first){
-    days_averages <- running
-    first <- FALSE
-  }else{
-    days_averages <- merge(days_averages,running,by="time",all=TRUE)
-  }
-}
-
-newCols <- colsplit(days_averages$time, "-", c("day","hour"))
-newCols$day <- factor(newCols$day,levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
-
-days_averages[,time:=NULL]
-days_averages <- cbind(days_averages, newCols)
-
-setkey(days_averages,day,hour)
-days_averages_mlt <- melt(days_averages,c("day","hour"))
-#levels(days_averages$day) <- factor(c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"),ordered=TRUE)
-
-
-ttl <- paste(paste(sensor_ids,collapse=","),"hour of the day average",paste(date(start),date(end),sep=" / "),sep=" - ")
-
-# a<- days_averages[variable %in% colnames(daily_avrg)[grep("^PM25",colnames(daily_avrg))]]
-# a<- days_averages[variable %in% c("PM25.697435","PM25.2183229")]
-# a<- days_averages_mlt[variable %in% c("PM25.697435","PM25.2183229")]
-
-g <- ggplot(data=days_averages_mlt,aes(x = hour, y = value,colour = variable,linetype=variable)) +
-  geom_line() +
-  scale_x_continuous(breaks=seq(0,23,4),minor_breaks=0:23) +
-  facet_wrap( ~ day, nrow = 1)
-
-
-g <- style_plot(g,ttl,"time",0)
-
-print(g)
-putMsg(ttl, doStop=TRUE)
-
 
 # waag_val$time[!is.na(waag_val$PM10.2183229) & waag_val$PM10.2183229 > 80]
 # waag_val$time[!is.na(waag_val$PM10.697435) & waag_val$PM10.697435 > 80]
