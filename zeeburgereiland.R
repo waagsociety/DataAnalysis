@@ -15,61 +15,13 @@
 library(jsonlite)
 library(curl)
 library(data.table)
-library(ggplot2)
 library(Hmisc)
 library(scales)
-library(lubridate)
-library(parsedate)
 library(reshape2)
 
-my_mean <-function(x){
-  mean(x,na.rm=TRUE)
-}
 
-get_elapsed <- function(){
-  elapsed <- (Sys.time()-start.time)
-  units(elapsed) <- "secs"
-  start.time <- Sys.time()
-  return(elapsed)
-}
+if(!exists("functionLoaded", mode="logical")) source("~/Software/code/Utils/R/Utils.R")
 
-putMsg <- function(msg,isEnd=TRUE,doStop=FALSE){
-  
-  if(!is.null(msg)){
-    #browser()
-    out <- paste(msg)
-    my_stars <- paste(rep("*",nchar(out)+1),collapse="")
-    writeLines("\n")
-    writeLines(my_stars)
-    writeLines(out)
-    
-    if (isEnd){
-      writeLines(my_stars)
-      #      writeLines("\n")
-    }
-  }
-  if (doStop){
-    readline(prompt="Press ENTER to continue")
-  }
-}
-
-hourlyTimeSlots <- function(my_start,my_end){
-  # Considering only full hours
-  my_start <- ceiling_date(my_start,"hour")
-  my_end <- floor_date(my_end,"hour")
-  n_hours <- interval(my_start,my_end)/hours(1) + 1
-  slots <- .POSIXct(.POSIXct(my_start,tz="UTC") + hours(0:n_hours),tz="CET")
-  return(slots)
-}
-
-dailyTimeSlots <- function(my_start,my_end){
-  # Considering only full days
-  my_start <- ceiling_date(my_start,"day")
-  my_end <- floor_date(my_end,"day")
-  n_days <- interval(my_start,my_end)/days(1)
-  slots <- .POSIXct(.POSIXct(my_start,tz="UTC") + days(0:n_days),tz="CET")
-  return(slots)
-}
 
 checkCompleteness <-function(times,days){
   min_time <- min(times)
