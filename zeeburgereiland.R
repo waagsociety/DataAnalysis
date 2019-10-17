@@ -18,6 +18,7 @@ library(data.table)
 library(Hmisc)
 library(scales)
 library(reshape2)
+library(lubridate)
 
 
 if(!exists("functionLoaded", mode="logical")) source("~/Software/code/Utils/R/Utils.R")
@@ -108,8 +109,8 @@ if(!exists("waag_hourly_avrg")){
   putMsg("Reading Waag sensors data", doStop=FALSE)
   
   #consider only full hours
-  start_date <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
-  # start_date <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
+  #start_date <- ceiling_date(as.POSIXct("11/10/2018 20:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
+  start_date <- ceiling_date(as.POSIXct("18/04/2019 09:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET"),"hour")
   end_date <- floor_date(Sys.time(),"hour")
   # end_date <- as.POSIXct("01/12/2018 00:00:00",format="%d/%m/%Y %H:%M:%S", tz="CET")
   
@@ -118,12 +119,14 @@ if(!exists("waag_hourly_avrg")){
   # suffix <- "&epoch=ms"
   suffix <- ""
   sensor_ids <- c(2183229,697435)
+  #sensor_ids <- c(1340640,1730246,9732434,9734042)
   where <- paste("( id = '",paste(sensor_ids,collapse="' OR id = '"),"' )",sep="")
   # .POSIXct(start_date, tz="CET")
   
   query_enc <- URLencode(sprintf(query, as.integer(start_date),as.integer(end_date),where))
-  
   request <- paste(server,query_enc,suffix,sep="")
+  
+  #browser()
   
   con <- curl(request)
   result <- readLines(con)
@@ -146,7 +149,7 @@ if(!exists("waag_hourly_avrg")){
   
   colnames(val_1) <- col_1
   colnames(val_2) <- col_2
-  browser()
+  #browser()
   val_1$time <- with_tz(ymd_hms(val_1$time))
   val_2$time <- with_tz(ymd_hms(val_2$time))
   
@@ -261,7 +264,7 @@ if(!exists("ggd_hourly_avrg")){
   
   # read measurements for the stations in Amsterdam
   endpoint <- '/measurements?'
-  pollutants <- c("PM25","PM10")
+  pollutants <- c("PM25","PM10","NO2","O3")
   formulas <- paste("formula=",pollutants,sep="",collapse="&")
   query <- "start=%s&end=%s&station_number=%s&%s&page=&order_by=timestamp_measured&order_direction=desc"
   
@@ -394,7 +397,7 @@ if(!exists("ggd_hourly_avrg")){
   putMsg(my_msg, doStop=FALSE)
   
 }
-
+browser()
 # Merging data structures
 hourly_avrg <-merge(waag_hourly_avrg,ggd_hourly_avrg,by.x="time",by.y="time",all=TRUE)
 colnames(hourly_avrg) <- gsub("value_PM","PM",colnames(hourly_avrg))
